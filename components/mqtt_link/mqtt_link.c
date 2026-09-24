@@ -40,6 +40,7 @@ void      mqtt_link_kick(void)      { }
 #include "meas_core.h"
 #include "net_mgr.h"
 #include "spooler.h"
+#include "wdt_util.h"
 
 /* -- HAI CHE DO, mot file ------------------------------------------------
  *
@@ -598,8 +599,7 @@ static void link_task(void *arg)
      * o day thi nhat ky sach hon va khong ban mot vong thu vo ich luc
      * moi boot. Cho theo lat nho de con nuoi watchdog. */
     while ((net_mgr_bits() & NET_BIT_WIFI) == 0) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        esp_task_wdt_reset();
+        wdt_safe_sleep_ms(500);
     }
 
     esp_mqtt_client_config_t cc = {
@@ -664,14 +664,31 @@ esp_err_t mqtt_link_start(void)
     }
 
     const char *serial = cfg_node_serial();
-    snprintf(s_topic_meas, sizeof(s_topic_meas), "%s/%s/meas",
-             CONFIG_MQTT_LINK_TOPIC_BASE, serial);
-    snprintf(s_topic_status, sizeof(s_topic_status), "%s/%s/status",
-             CONFIG_MQTT_LINK_TOPIC_BASE, serial);
-    snprintf(s_topic_cmd, sizeof(s_topic_cmd), "%s/%s/cmd",
-             CONFIG_MQTT_LINK_TOPIC_BASE, serial);
-    snprintf(s_topic_cmd_ack, sizeof(s_topic_cmd_ack), "%s/%s/cmdack",
-             CONFIG_MQTT_LINK_TOPIC_BASE, serial);
+    int tw;
+    tw = snprintf(s_topic_meas, sizeof(s_topic_meas), "%s/%s/meas",
+                  CONFIG_MQTT_LINK_TOPIC_BASE, serial);
+    if (tw < 0 || (size_t)tw >= sizeof(s_topic_meas)) {
+        ESP_LOGE(TAG, "topic base qua dai, khong the dung MQTT");
+        return ESP_ERR_INVALID_SIZE;
+    }
+    tw = snprintf(s_topic_status, sizeof(s_topic_status), "%s/%s/status",
+                  CONFIG_MQTT_LINK_TOPIC_BASE, serial);
+    if (tw < 0 || (size_t)tw >= sizeof(s_topic_status)) {
+        ESP_LOGE(TAG, "topic base qua dai, khong the dung MQTT");
+        return ESP_ERR_INVALID_SIZE;
+    }
+    tw = snprintf(s_topic_cmd, sizeof(s_topic_cmd), "%s/%s/cmd",
+                  CONFIG_MQTT_LINK_TOPIC_BASE, serial);
+    if (tw < 0 || (size_t)tw >= sizeof(s_topic_cmd)) {
+        ESP_LOGE(TAG, "topic base qua dai, khong the dung MQTT");
+        return ESP_ERR_INVALID_SIZE;
+    }
+    tw = snprintf(s_topic_cmd_ack, sizeof(s_topic_cmd_ack), "%s/%s/cmdack",
+                  CONFIG_MQTT_LINK_TOPIC_BASE, serial);
+    if (tw < 0 || (size_t)tw >= sizeof(s_topic_cmd_ack)) {
+        ESP_LOGE(TAG, "topic base qua dai, khong the dung MQTT");
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     s_cmd_q = xQueueCreate(CMD_QUEUE_LEN, sizeof(cmd_msg_t));
     if (s_cmd_q == NULL) {

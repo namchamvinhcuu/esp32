@@ -55,6 +55,7 @@ void      uplink_set_tower_cb(uplink_tower_cb_t cb) { (void)cb; }
 #include "net_mgr.h"
 #include "spooler.h"
 #include "uplink.h"
+#include "wdt_util.h"
 
 /* edge_collector contract (../edge_collector/edge_collector/node_api.py);
  * node_agent (../node_agent/node_agent/edge_client.py) is the reference
@@ -143,17 +144,6 @@ static void __attribute__((unused)) handle_tower(const cJSON *root)
         v[i] = cJSON_IsNumber(it) ? (it->valuedouble != 0) : -1;
     }
     s_tower_cb(v[0], v[1], v[2], v[3], v[4]);
-}
-
-/* long sleeps must keep petting the task watchdog (30 s timeout) */
-static void sleep_ms_wdt(uint32_t ms)
-{
-    while (ms > 0) {
-        uint32_t step = ms > 1000 ? 1000 : ms;
-        vTaskDelay(pdMS_TO_TICKS(step));
-        esp_task_wdt_reset();
-        ms -= step;
-    }
 }
 
 static esp_err_t http_evt(esp_http_client_event_t *evt)
@@ -255,7 +245,11 @@ static esp_http_client_handle_t http_client_for(const char *url)
 static int http_post_json(const char *path, const char *body, bool include_key)
 {
     char url[192];
-    snprintf(url, sizeof(url), "%s%s", cfg_get_server_url(), path);
+    int uw = snprintf(url, sizeof(url), "%s%s", cfg_get_server_url(), path);
+    if (uw < 0 || (size_t)uw >= sizeof(url)) {
+        ESP_LOGW(TAG, "URL qua dai, bo qua request: %s", path);
+        return -1;
+    }
 
     s_resp_len = 0;
     s_resp[0]  = '\0';
@@ -389,7 +383,7 @@ static bool upload_batch(const measurement_t *batch, size_t n)
     }
     if (status == 401 || status == 403) {
         ESP_LOGE(TAG, "auth rejected (%d), retry in 60 s", status);
-        sleep_ms_wdt(60000);
+        wdt_safe_sleep_ms(60000);
         return false;
     }
     if (status == 413 && n > 1) {
@@ -487,7 +481,11 @@ static void send_hello(void)
 static int http_get_buf(const char *path, char *buf, int cap, int *out_status)
 {
     char url[192];
-    snprintf(url, sizeof(url), "%s%s", cfg_get_server_url(), path);
+    int uw = snprintf(url, sizeof(url), "%s%s", cfg_get_server_url(), path);
+    if (uw < 0 || (size_t)uw >= sizeof(url)) {
+        ESP_LOGW(TAG, "URL qua dai, bo qua request: %s", path);
+        return -1;
+    }
 
     esp_http_client_handle_t cl = http_client_for(url);
     if (cl == NULL) {
@@ -625,8 +623,33 @@ static void __attribute__((unused)) check_config_update(void)
  * ACK ve /node/v1/commands/ack de tra loi lai cho Odoo's
  * SourceManager.queue_command() (dang cho, 8 s timeout) ngay lap tuc thay
  * vi de no tu het gio. */
+/* Gui ACK cho 1 lenh da poll duoc — dung chung cho ca duong thuc thi that
+ * lan duong "da thuc thi roi, chi ack lai" (xem dedup trong poll_command).
+ * ACK POST that bai (mat mang) truoc day bi bo qua hoan toan, khong log —
+ * gio log WARN de con dau vet khi Odoo bao "lenh that bai" oan cho node. */
+static void send_command_ack(long id, bool ok, const char *detail)
+{
+    cJSON *ack = cJSON_CreateObject();
+    cJSON_AddNumberToObject(ack, "id", (double)id);
+    cJSON_AddBoolToObject(ack, "ok", ok);
+    if (!ok && detail != NULL) {
+        cJSON_AddStringToObject(ack, "detail", detail);
+    }
+    char *ack_body = cJSON_PrintUnformatted(ack);
+    cJSON_Delete(ack);
+    if (ack_body != NULL) {
+        int st = http_post_json(PATH_COMMANDS_ACK, ack_body, true);
+        if (st != 200) {
+            ESP_LOGW(TAG, "gui ACK cho lenh %ld that bai (mat mang?) status=%d", id, st);
+        }
+        cJSON_free(ack_body);
+    }
+}
+
 static void poll_command(void)
 {
+    static long s_last_ok_cmd_id = -1;
+
     char buf[256];
     int status = -1;
     int len = http_get_buf(PATH_COMMANDS, buf, sizeof(buf) - 1, &status);
@@ -641,6 +664,19 @@ static void poll_command(void)
     const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(r, "command");
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(cmd, "id");
     if (cJSON_IsObject(cmd) && cJSON_IsNumber(id)) {
+        const long cmd_id = (long)id->valuedouble;
+
+        /* Da thuc thi lenh nay roi (poll lai do mat ACK truoc): ack lai
+         * nhung KHONG goi gpio_out_execute() lan nua — bam mot lan khong
+         * duoc bien thanh hai lan dao relay. Cung logic voi
+         * mqtt_link.c::handle_command() (s_last_id). */
+        if (cmd_id == s_last_ok_cmd_id) {
+            ESP_LOGI(TAG, "lenh %ld da thuc thi roi, chi ack lai", cmd_id);
+            send_command_ack(cmd_id, true, NULL);
+            cJSON_Delete(r);
+            return;
+        }
+
         const cJSON *ch    = cJSON_GetObjectItemCaseSensitive(cmd, "channel");
         const cJSON *op    = cJSON_GetObjectItemCaseSensitive(cmd, "cmd");
         const cJSON *value = cJSON_GetObjectItemCaseSensitive(cmd, "value");
@@ -660,24 +696,13 @@ static void poll_command(void)
         char detail[64];
         bool ok = gpio_out_execute(&gc, detail, sizeof(detail));
         if (ok) {
+            s_last_ok_cmd_id = cmd_id;
             ESP_LOGI(TAG, "lenh '%s' tren kenh '%s' thuc thi OK", op_str, ch_code);
         } else {
             ESP_LOGW(TAG, "lenh '%s' tren kenh '%s' bi tu choi: %s",
                      op_str, ch_code, detail);
         }
-
-        cJSON *ack = cJSON_CreateObject();
-        cJSON_AddNumberToObject(ack, "id", id->valuedouble);
-        cJSON_AddBoolToObject(ack, "ok", ok);
-        if (!ok) {
-            cJSON_AddStringToObject(ack, "detail", detail);
-        }
-        char *ack_body = cJSON_PrintUnformatted(ack);
-        cJSON_Delete(ack);
-        if (ack_body != NULL) {
-            http_post_json(PATH_COMMANDS_ACK, ack_body, true);
-            cJSON_free(ack_body);
-        }
+        send_command_ack(cmd_id, ok, ok ? NULL : detail);
     }
     cJSON_Delete(r);
 }
@@ -794,7 +819,7 @@ static void backoff_sleep(void)
     }
     uint32_t jitter = s_backoff_ms / 100 * (esp_random() % 21); /* 0-20% */
     ESP_LOGW(TAG, "upload failed, backoff %" PRIu32 " ms", s_backoff_ms + jitter);
-    sleep_ms_wdt(s_backoff_ms + jitter);
+    wdt_safe_sleep_ms(s_backoff_ms + jitter);
 }
 
 static TaskHandle_t s_task;
