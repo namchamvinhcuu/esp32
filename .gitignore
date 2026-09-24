@@ -23,3 +23,8 @@ graphify-out/
 # CLAUDE.md/AGENTS.md = symlink per-machine -> sync qua claude-agents
 CLAUDE.md
 AGENTS.md
+
+# compile_commands.json o root = symlink -> build/compile_commands.json,
+# tao thu cong de clangd/Serena resolve include ESP-IDF that (per-machine,
+# path tuyet doi ben trong khac nhau giua may)
+/compile_commands.json
