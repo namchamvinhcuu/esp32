@@ -1,0 +1,4 @@
+# mDNS: node reachable at http://fms-node-xxxx.local/ regardless of the
+# DHCP-assigned IP (removed from IDF core, comes from the registry).
+dependencies:
+  espressif/mdns: "^1.2"

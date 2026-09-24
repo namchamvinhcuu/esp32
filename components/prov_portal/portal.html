@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FMS Node — Configuration</title>
+<style>
+  :root{--bg:#101b1e;--card:#16252a;--ink:#e2ece9;--mut:#8fa5a3;
+        --acc:#2fc39f;--warn:#e09a4d;--err:#e06060;--line:#24363a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.5 system-ui,"Segoe UI",sans-serif;padding:16px}
+  .wrap{max-width:430px;margin:0 auto}
+  h1{font-size:19px;margin:8px 0 2px}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+  .card{background:var(--card);border:1px solid var(--line);
+        border-radius:10px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 4px}
+  input,select{width:100%;padding:10px;border-radius:8px;font:inherit;
+        border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+  input:focus,select:focus{outline:2px solid var(--acc)}
+  button{width:100%;padding:12px;margin-top:12px;border:0;border-radius:8px;
+        font:inherit;font-weight:600;cursor:pointer;
+        background:var(--acc);color:#06251d}
+  button.ghost{background:transparent;color:var(--mut);
+        border:1px solid var(--line);font-weight:400}
+  button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .st{padding:10px 12px;border-radius:8px;font-size:14px;margin-top:12px;
+      background:var(--bg);border:1px solid var(--line);min-height:20px}
+  .st.ok{border-color:var(--acc);color:var(--acc)}
+  .st.err{border-color:var(--err);color:var(--err)}
+  .st.busy{border-color:var(--warn);color:var(--warn)}
+  .kv{display:flex;justify-content:space-between;font-size:13.5px;
+      padding:3px 0;color:var(--mut)}
+  .kv b{color:var(--ink);font-weight:500}
+  #main{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FMS Node — Configuration</h1>
+  <p class="sub" id="subtitle">On-device setup portal · maintenance mode only</p>
+
+  <!-- LOGIN -->
+  <div class="card" id="login">
+    <label for="pw">Admin password</label>
+    <input type="password" id="pw" autocomplete="current-password"
+           placeholder="Enter password to open configuration">
+    <button id="btnLogin">LOG IN</button>
+    <div class="st" id="loginSt">This page requires a password.</div>
+  </div>
+
+  <!-- CONFIGURATION -->
+  <div id="main">
+    <div class="card" id="info"></div>
+
+    <div class="card" id="healthCard" style="display:none">
+      <label style="margin-top:0">Live status (auto-refresh every 3 s)</label>
+      <div id="health"></div>
+    </div>
+
+    <div class="card">
+      <label for="nets">Scanned WiFi networks</label>
+      <div class="row">
+        <select id="nets"><option value="">— press Scan —</option></select>
+        <button class="ghost" id="btnScan" style="flex:0 0 90px">Scan</button>
+      </div>
+      <label for="ssid">WiFi name (SSID) — 2.4 GHz network</label>
+      <input id="ssid" autocomplete="off">
+      <label for="wpass">WiFi password</label>
+      <input id="wpass" type="password" autocomplete="off">
+      <label for="locname">Location / machine name (shown as device name in Odoo)</label>
+      <input id="locname" placeholder="Press machine 3, Line B" maxlength="46">
+      <label for="url">Server address (Odoo / data collection server)</label>
+      <input id="url" placeholder="http://192.168.1.50:8000">
+      <label for="apikey">Device API key (leave blank to keep current)</label>
+      <input id="apikey" autocomplete="off">
+      <label for="npw">Change this page's password (leave blank to keep current)</label>
+      <input id="npw" type="password" autocomplete="new-password">
+
+      <button id="btnSave">SAVE &amp; TEST CONNECTION</button>
+      <button class="ghost" id="btnForce">Save without testing (target WiFi not present here)</button>
+      <div class="st" id="saveSt">No action yet.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let polling = null;
+let isRuntime = false;
+
+async function api(path, body){
+  const opt = body ? {method:"POST", body:JSON.stringify(body),
+                      headers:{"Content-Type":"application/json"}} : {};
+  const r = await fetch(path, opt);
+  return {status:r.status, data:await r.json().catch(()=>({}))};
+}
+
+function setSt(el, cls, text){ el.className = "st " + cls; el.textContent = text; }
+
+$("btnLogin").onclick = async () => {
+  setSt($("loginSt"), "busy", "Checking...");
+  const r = await api("/api/login", {password: $("pw").value});
+  if (r.data.ok){ await enterMain(); }
+  else setSt($("loginSt"), "err", "Wrong password.");
+};
+$("pw").addEventListener("keydown", e => { if(e.key==="Enter") $("btnLogin").click(); });
+
+async function enterMain(){
+  const r = await api("/api/status");
+  if (!r.data.authed) return;
+  isRuntime = !!r.data.runtime;
+  if (isRuntime){
+    $("subtitle").textContent =
+      "Node is RUNNING — leave WiFi blank to change only the server; it reboots after saving.";
+  }
+  $("login").style.display = "none";
+  $("main").style.display = "block";
+  $("info").innerHTML =
+    kv("Node", r.data.node) + kv("Serial", r.data.serial) +
+    kv("Firmware", r.data.fw) + kv("Location", r.data.cur_name) +
+    kv("IP address", r.data.ip) +
+    kv("Fixed name", r.data.mdns ? "http://" + r.data.mdns + "/" : "") +
+    kv("Saved WiFi", r.data.cur_ssid) + kv("Saved server", r.data.cur_url);
+  $("url").value = r.data.cur_url || "";
+  $("locname").value = r.data.cur_name || "";
+  renderHealth(r.data.health);
+  if (isRuntime) setInterval(refreshStatus, 3000);
+}
+function kv(k,v){ return `<div class="kv"><span>${k}</span><b>${v||"—"}</b></div>`; }
+function dot(ok, okText, badText){
+  return `<span style="color:${ok?"var(--acc)":"var(--err)"}">&#9679; ${ok?okText:badText}</span>`;
+}
+
+function renderHealth(h){
+  if (!h){ return; }
+  $("healthCard").style.display = "block";
+  const towerLabel = {mbrtu:"Modbus relay module", gpio:"GPIO relay", off:"(disabled)"}[h.tower] || h.tower;
+  $("health").innerHTML =
+    kv("Data server", dot(h.srv_ok, "Connected", "DISCONNECTED — check server/network")) +
+    (h.tower === "off" ? "" :
+      kv("Tower light — " + towerLabel, dot(h.tower_ok, "OK", "no response (module not wired?)"))) +
+    kv("Sent to server", h.sent + " samples") +
+    kv("Buffered (pending)", h.spool + " samples") +
+    kv("Dropped samples", String(h.drop)) +
+    kv("WiFi signal", h.rssi + " dBm");
+}
+
+async function refreshStatus(){
+  try{
+    const r = await api("/api/status");
+    if (r.data.authed) renderHealth(r.data.health);
+  } catch(e){ /* node rebooting — retry next tick */ }
+}
+
+$("btnScan").onclick = async () => {
+  $("btnScan").disabled = true;
+  $("nets").innerHTML = "<option>Scanning...</option>";
+  const r = await api("/api/scan");
+  const nets = (r.data.networks||[]).sort((a,b)=>b.rssi-a.rssi);
+  $("nets").innerHTML = "<option value=''>— select a network —</option>" +
+    nets.map(n=>`<option value="${n.ssid.replace(/"/g,"&quot;")}">`+
+      `${n.ssid} (${n.rssi} dBm${n.secure?"":" · OPEN"})</option>`).join("");
+  $("btnScan").disabled = false;
+};
+$("nets").onchange = () => { if($("nets").value) $("ssid").value = $("nets").value; };
+
+async function doSave(skip){
+  if (!$("ssid").value && !isRuntime){
+    setSt($("saveSt"),"err","WiFi name is required."); return;
+  }
+  const body = {ssid:$("ssid").value, pass:$("wpass").value,
+                url:$("url").value, apikey:$("apikey").value,
+                webpass:$("npw").value, locname:$("locname").value,
+                skip_test:skip};
+  $("btnSave").disabled = $("btnForce").disabled = true;
+  setSt($("saveSt"),"busy", skip ? "Saving..." : "Trying to join target WiFi...");
+  await api("/api/save", body);
+  polling = setInterval(pollTest, 1000);
+}
+$("btnSave").onclick  = () => doSave(false);
+$("btnForce").onclick = () => doSave(true);
+
+async function pollTest(){
+  let r;
+  try { r = await api("/api/status"); }
+  catch(e){
+    // node rebooted into normal mode — the SoftAP vanishing is the expected outcome
+    setSt($("saveSt"),"ok","Saved. Node rebooted into normal mode — you can close this page.");
+    clearInterval(polling); return;
+  }
+  const t = r.data.test, reasons = {15:"wrong WiFi password",2:"wrong WiFi password",
+    201:"network not found (check 2.4 GHz / SSID)",205:"connection refused"};
+  if (t==="connecting") setSt($("saveSt"),"busy","Joining WiFi \""+$("ssid").value+"\"...");
+  else if (t==="got_ip"||t==="rebooting"){
+    setSt($("saveSt"),"ok","WiFi OK"+(r.data.sta_ip?" (IP "+r.data.sta_ip+")":"")+
+      " — saved, node is rebooting...");
+  }
+  else if (t==="failed"){
+    setSt($("saveSt"),"err","Could not join WiFi — "+
+      (reasons[r.data.fail_reason]||("error code "+r.data.fail_reason))+". Fix and try again.");
+    $("btnSave").disabled = $("btnForce").disabled = false;
+    clearInterval(polling);
+  }
+}
+
+// if the session cookie is still valid (page refresh) go straight in
+enterMain();
+</script>
+</body>
+</html>

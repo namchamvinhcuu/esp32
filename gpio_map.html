@@ -1,0 +1,300 @@
+<!doctype html>
+<title>Sơ Đồ GPIO FMS Node</title>
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap');
+
+:root{
+  --bg:#eef2f1;
+  --surface:#ffffff;
+  --surface-2:#e4ebe9;
+  --ink:#16211f;
+  --ink-muted:#51625e;
+  --ink-faint:#7c8d89;
+  --border:#cfdad7;
+  --accent:#0e7c74;
+  --accent-strong:#0a5f59;
+  --accent-tint:#dcefec;
+  --critical:#b3413a;
+  --critical-tint:#f7e4e2;
+  --warning:#a06a12;
+  --warning-tint:#f4e8d3;
+  --shadow: 0 1px 2px rgba(15,30,28,0.05), 0 6px 20px -8px rgba(15,30,28,0.12);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1413;
+    --surface:#131d1c;
+    --surface-2:#182322;
+    --ink:#e7efed;
+    --ink-muted:#9db3ad;
+    --ink-faint:#6e8580;
+    --border:#233330;
+    --accent:#3fcbba;
+    --accent-strong:#63dbcb;
+    --accent-tint:#16302d;
+    --critical:#e2695f;
+    --critical-tint:#31201e;
+    --warning:#e3b45a;
+    --warning-tint:#302818;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -10px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1413;
+  --surface:#131d1c;
+  --surface-2:#182322;
+  --ink:#e7efed;
+  --ink-muted:#9db3ad;
+  --ink-faint:#6e8580;
+  --border:#233330;
+  --accent:#3fcbba;
+  --accent-strong:#63dbcb;
+  --accent-tint:#16302d;
+  --critical:#e2695f;
+  --critical-tint:#31201e;
+  --warning:#e3b45a;
+  --warning-tint:#302818;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -10px rgba(0,0,0,0.5);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Work Sans', system-ui, sans-serif;
+  padding:32px 16px 64px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{ max-width:1080px; margin:0 auto; display:flex; flex-direction:column; gap:28px; }
+
+h1,h2,h3{ font-family:'Archivo', system-ui, sans-serif; text-wrap:balance; margin:0; }
+code, .mono, .pin{ font-family:'IBM Plex Mono', ui-monospace, monospace; }
+
+/* ---------- header ---------- */
+header{ display:flex; flex-direction:column; gap:10px; padding-top:4px; }
+.eyebrow{
+  font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--accent-strong); font-weight:600;
+}
+h1{ font-size:clamp(26px,4vw,36px); font-weight:800; letter-spacing:-0.01em; }
+.sub{ color:var(--ink-muted); font-size:15px; max-width:62ch; line-height:1.55; }
+.chip-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; }
+.chip{
+  font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:600;
+  padding:4px 10px; border-radius:100px; border:1px solid var(--border);
+  color:var(--ink-muted); background:var(--surface);
+}
+
+/* ---------- alert banner ---------- */
+.alert{
+  display:flex; gap:14px; padding:16px 18px; border-radius:10px;
+  background:var(--critical-tint); border:1px solid color-mix(in srgb, var(--critical) 35%, var(--border));
+  box-shadow:var(--shadow);
+}
+.alert .mark{
+  font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:13px;
+  color:#fff; background:var(--critical); border-radius:6px; padding:2px 8px;
+  height:fit-content; letter-spacing:.04em;
+}
+.alert-body{ display:flex; flex-direction:column; gap:4px; }
+.alert-body b{ font-size:14.5px; }
+.alert-body p{ margin:0; color:var(--ink-muted); font-size:13.5px; line-height:1.55; }
+.alert-body .pin{ color:var(--critical); font-weight:700; }
+
+/* ---------- subsystem grid ---------- */
+.grid{
+  display:grid; gap:16px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:var(--shadow); display:flex; flex-direction:column; overflow:hidden;
+}
+.card-head{
+  padding:14px 16px 12px; border-bottom:1px solid var(--border);
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+}
+.card-head h3{ font-size:15px; font-weight:700; }
+.tag{
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:600;
+  letter-spacing:.05em; text-transform:uppercase; color:var(--accent-strong);
+  background:var(--accent-tint); padding:3px 7px; border-radius:5px; white-space:nowrap;
+}
+.pins{ display:flex; flex-direction:column; }
+.pin-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:9px 16px; border-bottom:1px solid var(--border); font-size:13.5px;
+}
+.pin-row:last-child{ border-bottom:none; }
+.pin-row.conflict{ background:var(--critical-tint); }
+.pin-label{ color:var(--ink-muted); }
+.pin-badge{
+  font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:13px;
+  background:var(--surface-2); color:var(--ink); border-radius:6px;
+  padding:2px 8px; font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.pin-row.conflict .pin-badge{ background:var(--critical); color:#fff; }
+.card-foot{
+  padding:9px 16px 12px; font-size:12px; color:var(--ink-faint); line-height:1.5;
+  border-top:1px dashed var(--border);
+}
+
+/* ---------- reserved + notes ---------- */
+.section-title{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-muted); }
+.two-col{ display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+@media (max-width:640px){ .two-col{ grid-template-columns:1fr; } }
+.note-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:16px 18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:8px;
+}
+.note-card p{ margin:0; font-size:13.5px; color:var(--ink-muted); line-height:1.6; }
+.note-card .pin{ color:var(--ink); background:var(--surface-2); padding:1px 6px; border-radius:4px; font-size:12.5px; }
+.warn-tag{
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:600; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--warning); background:var(--warning-tint);
+  padding:3px 7px; border-radius:5px; width:fit-content;
+}
+
+footer{
+  border-top:1px solid var(--border); padding-top:16px; margin-top:8px;
+  font-size:12px; color:var(--ink-faint); display:flex; flex-direction:column; gap:4px;
+}
+footer code{ background:var(--surface-2); padding:1px 5px; border-radius:4px; }
+
+@media (max-width:400px){
+  .card-head{ flex-direction:column; align-items:flex-start; gap:6px; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">fms-node · esp32-s3</span>
+    <h1>Sơ đồ GPIO đang dùng trong firmware</h1>
+    <p class="sub">
+      Trích trực tiếp từ <code>sdkconfig</code> đang build (không phải giá trị mặc định trong
+      <code>Kconfig.projbuild</code>) + các chân cố định trong code. Dùng để đối chiếu khi
+      chuyển sang board ESP32 mới — kiểm tra từng chân còn hợp lệ/còn trống trên board đó trước khi hàn.
+    </p>
+    <div class="chip-row">
+      <span class="chip">chip đích: ESP32-S3</span>
+      <span class="chip">nguồn: sdkconfig hiện tại</span>
+      <span class="chip">1 xung đột đang phát hiện</span>
+    </div>
+  </header>
+
+  <div class="alert">
+    <span class="mark">XUNG ĐỘT</span>
+    <div class="alert-body">
+      <b>GPIO8 được cấp phát hai lần</b>
+      <p>
+        <span class="pin">CONFIG_FMS_I2C_SDA_GPIO=8</span> (cảm biến SHT3x/AHT20) và
+        <span class="pin">CONFIG_FMS_TOWER_B_GPIO=8</span> (relay đèn tháp — màu XANH DƯƠNG)
+        đang trỏ CHUNG một chân. Bật cả I2C lẫn đèn tháp backend GPIO cùng lúc sẽ đụng phần cứng.
+        Đổi một trong hai qua <code>idf.py menuconfig</code> trước khi hàn board mới —
+        chính comment trong <code>Kconfig.projbuild</code> đã cảnh báo trước việc này
+        ("tower relay pins IO5-IO8") nhưng cấu hình hiện tại vẫn trùng.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-head"><h3>Console</h3><span class="tag">USB-JTAG</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">D−</span><span class="pin-badge">GPIO19</span></div>
+        <div class="pin-row"><span class="pin-label">D+</span><span class="pin-badge">GPIO20</span></div>
+      </div>
+      <div class="card-foot">Cố định trong silicon ESP32-S3 — không cấu hình được, không dùng lại cho việc khác.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Cân điện tử (UART1)</h3><span class="tag">scale_serial</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">RX</span><span class="pin-badge">GPIO44</span></div>
+        <div class="pin-row"><span class="pin-label">TX</span><span class="pin-badge">GPIO43</span></div>
+      </div>
+      <div class="card-foot">9600 baud · parser cas_generic · bắt buộc MAX3232 (RS-232 ±12V) trước DB9.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Serial phụ (UART0)</h3><span class="tag">2nd device</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">RX</span><span class="pin-badge">GPIO4</span></div>
+        <div class="pin-row"><span class="pin-label">TX</span><span class="pin-badge">GPIO3</span></div>
+      </div>
+      <div class="card-foot">Cân thứ 2 / HC-05 Bluetooth-Classic / đầu đọc mã vạch. UART0 rảnh vì console chạy qua USB-JTAG.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>RS485 (Modbus RTU)</h3><span class="tag">mb_rtu</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">TX</span><span class="pin-badge">GPIO17</span></div>
+        <div class="pin-row"><span class="pin-label">RX</span><span class="pin-badge">GPIO18</span></div>
+        <div class="pin-row"><span class="pin-label">DE/RE</span><span class="pin-badge">GPIO21</span></div>
+      </div>
+      <div class="card-foot">Transceiver onboard của Waveshare ESP32-S3-RS485-CAN · 9600 baud · DE/RE lái như UART RTS.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>I2C (cảm biến demo)</h3><span class="tag">i2c_sens</span></div>
+      <div class="pins">
+        <div class="pin-row conflict"><span class="pin-label">SDA ⚠</span><span class="pin-badge">GPIO8</span></div>
+        <div class="pin-row"><span class="pin-label">SCL</span><span class="pin-badge">GPIO9</span></div>
+      </div>
+      <div class="card-foot">SHT3x (nhiệt/ẩm) hoặc AHT20. SDA trùng chân với relay BLUE của đèn tháp — xem cảnh báo phía trên.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Nút bấm cấu hình</h3><span class="tag">prov_portal</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">BOOT btn</span><span class="pin-badge">GPIO0</span></div>
+      </div>
+      <div class="card-foot">Giữ ~5s khi đang chạy → reboot vào cổng cấu hình SoftAP FMS-NODE-xxxx.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Đèn tháp (relay GPIO)</h3><span class="tag">tower_light</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">RED</span><span class="pin-badge">GPIO5</span></div>
+        <div class="pin-row"><span class="pin-label">YELLOW</span><span class="pin-badge">GPIO6</span></div>
+        <div class="pin-row"><span class="pin-label">GREEN</span><span class="pin-badge">GPIO7</span></div>
+        <div class="pin-row conflict"><span class="pin-label">BLUE ⚠</span><span class="pin-badge">GPIO8</span></div>
+        <div class="pin-row"><span class="pin-label">BUZZER</span><span class="pin-badge">GPIO14</span></div>
+      </div>
+      <div class="card-foot">Backend hiện tại = GPIO relay trực tiếp (không phải Modbus RTU). Active-HIGH (HW-280).</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Đầu vào đếm/trạng thái</h3><span class="tag">io_scan</span></div>
+      <div class="pins">
+        <div class="pin-row"><span class="pin-label">— chưa cấu hình —</span><span class="pin-badge">n/a</span></div>
+      </div>
+      <div class="card-foot">
+        Không có chân cố định: mỗi kênh <code class="mono">"bus":"gpio"</code> trong channels.json
+        tự khai <code class="mono">"pin"</code> riêng. <code>channels.json</code> mặc định hiện không
+        khai kênh GPIO nào.
+      </div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="note-card">
+      <span class="section-title">Chưa dùng GPIO trực tiếp</span>
+      <p><b>WiFi / BLE (NimBLE)</b> — ble_uart, ble_central, ble_print, net_mgr: dùng RF nội bộ của chip, không qua GPIO ngoài.</p>
+      <p><b>Modbus TCP</b> (mb_tcp) — chạy qua WiFi, không có chân riêng.</p>
+    </div>
+    <div class="note-card">
+      <span class="warn-tag">trước khi hàn board mới</span>
+      <p>Xác nhận board mới vẫn là <b>ESP32-S3</b> (44 dùng GPIO19/20 cho USB-JTAG, N16R8 hay khác đều được) —
+      nếu là ESP32 thường (không phải S3) thì không có USB-Serial-JTAG, một số GPIO ở trên
+      (33-48) không tồn tại và toàn bộ bảng này phải ánh xạ lại.</p>
+      <p>GPIO0/45/46 thường là strapping pin lúc boot — tránh gán thêm relay/cảm biến vào đó trên board mới.</p>
+    </div>
+  </div>
+
+  <footer>
+    <span>Nguồn: <code>sdkconfig</code> (dòng 985-1034) đối chiếu <code>main/Kconfig.projbuild</code>,
+    <code>components/{scale_serial,mb_rtu,i2c_sens,tower_light,prov_portal,io_scan}</code>.</span>
+    <span>Sinh thủ công theo state code tại thời điểm viết — chạy lại đối chiếu nếu sdkconfig đổi sau này.</span>
+  </footer>
+</div>

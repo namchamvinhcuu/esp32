@@ -1,0 +1,46 @@
+# FMS Node defaults (ESP-IDF v5.2+, esp32s3)
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Flash: 8 MB (Waveshare ESP32-S3 modules; adjust for 4 MB devkits if needed) ---
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# --- Custom partition table (no OTA in demo, see partitions.csv) ---
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- FreeRTOS 1 kHz tick for finer timeouts ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- Task watchdog: enabled, generous timeout (HTTP timeouts can block up to 10 s) ---
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# --- LWIP SNTP ---
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
+
+# --- BLE: NimBLE peripheral (Nordic UART Service feed for the B4A app) ---
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+# WiFi + BLE share one radio; software coexistence is mandatory
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+
+# --- Logging ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# NOTE: PSRAM intentionally NOT enabled here; spooler falls back to internal RAM.
+# On boards with PSRAM enable: CONFIG_SPIRAM=y, CONFIG_SPIRAM_MODE_OCT=y (S3 octal)
+
+# --- Do luong (component diag) ---
+# Hai tuy chon nay la DIEU KIEN de bang ngan xep + CPU trong diag.c bien
+# dich vao. Thieu chung thi diag roi vao nhanh #else va binh bien ra khac
+# voi cai dang chay tren node. Chi phi: vai byte moi TCB, doi lay viec
+# chan doan duoc mot node dang chay ma khong phai nap lai firmware.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+# 21/09: nhac lai gia tri dung im 2 s thay vi 5 s — nguoi dung thay
+# nhiet do/do am "phan hoi cham"; do chinh la nhip nhac lai nay.
+CONFIG_MQTT_LINK_MAX_SILENCE_MS=2000

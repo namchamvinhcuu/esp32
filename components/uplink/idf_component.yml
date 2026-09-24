@@ -1,0 +1,3 @@
+# cJSON was removed from ESP-IDF core in v6.0 — pull it from the registry.
+dependencies:
+  espressif/cjson: "^1.7"

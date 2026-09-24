@@ -1,0 +1,216 @@
+menu "FMS Node"
+
+    config FMS_WIFI_SSID
+        string "WiFi SSID"
+        default "changeme-ssid"
+        help
+            Seeded into NVS on first boot. Later changes go through NVS.
+
+    config FMS_WIFI_PASS
+        string "WiFi password"
+        default "changeme-pass"
+
+    config FMS_SERVER_URL
+        string "Edge base URL"
+        default "http://192.168.5.33:8000"
+        help
+            Base URL of the edge_collector instance this node talks to
+            (/node/v1/*, see edge_collector/edge_collector/node_api.py).
+            No trailing slash.
+
+    config FMS_API_KEY
+        string "Device API key (usually leave empty)"
+        default ""
+        help
+            Normally learned automatically from the edge's /node/v1/hello
+            response once Odoo has created a pcm.device for this node's
+            serial (see cfg_set_api_key()/uplink's send_hello()). Only set
+            this if the key must be pinned ahead of time.
+
+    config FMS_SCALE_UART_NUM
+        int "Scale UART port number"
+        default 2
+        help
+            UART2 by default: on the Waveshare RS485-CAN board UART1-class
+            pins 17/18 belong to the onboard RS485 transceiver (mb_rtu).
+
+    config FMS_SCALE_UART_RX_GPIO
+        int "Scale UART RX GPIO"
+        default 4
+        help
+            !!! Scale RS-232 is +/-12V. A MAX3232 level shifter between the
+            scale DB9 and these pins is MANDATORY. Never wire DB9 directly.
+            IO4/IO5 are exposed on the Waveshare board's header.
+
+    config FMS_SCALE_UART_TX_GPIO
+        int "Scale UART TX GPIO"
+        default 5
+
+    config FMS_SCALE_BAUD
+        int "Scale UART baud rate"
+        default 9600
+
+    config FMS_SERIAL2_UART_NUM
+        int "Second serial port UART number"
+        default 0
+        help
+            UART0 is free because the console runs on USB-Serial-JTAG.
+            Serves iot.channel entries with Serial Port = 2 (second scale,
+            HC-05 Bluetooth-Classic bridge, barcode reader...).
+
+    config FMS_SERIAL2_RX_GPIO
+        int "Second serial port RX GPIO"
+        default 4
+        help
+            IO3/IO4 are exposed on the Waveshare board's header. Make sure
+            they don't collide with the first port (FMS_SCALE_UART_*_GPIO,
+            normally moved to 43/44), the opto inputs (IO1/IO2) or the
+            tower relay pins (IO5-IO8 since 21/07/2026).
+
+    config FMS_SERIAL2_TX_GPIO
+        int "Second serial port TX GPIO"
+        default 3
+
+    config FMS_RS485_TX_GPIO
+        int "RS485 (Modbus RTU) TX GPIO"
+        default 17
+        help
+            Onboard RS485 transceiver of the Waveshare ESP32-S3-RS485-CAN
+            (auto direction switching, isolated). A+/B- screw terminal.
+
+    config FMS_RS485_RX_GPIO
+        int "RS485 (Modbus RTU) RX GPIO"
+        default 18
+
+    config FMS_RS485_EN_GPIO
+        int "RS485 (Modbus RTU) EN (DE/RE) GPIO, -1 = none"
+        default 21
+        help
+            Direction-enable of the onboard isolated transceiver
+            (Waveshare ESP32-S3-RS485-CAN: GPIO21). Driven as UART RTS in
+            RS485 half-duplex mode: HIGH while transmitting, LOW to
+            receive. Left undriven the receiver stays disabled — the node
+            can transmit but never hears replies. Set -1 for boards whose
+            transceiver switches direction fully in hardware.
+
+    config FMS_RS485_BAUD
+        int "RS485 (Modbus RTU) baud rate"
+        default 9600
+
+    config FMS_I2C_SDA_GPIO
+        int "I2C SDA GPIO (demo sensors SHT3x/AHT20)"
+        default 8
+
+    config FMS_I2C_SCL_GPIO
+        int "I2C SCL GPIO (demo sensors SHT3x/AHT20)"
+        default 9
+
+    config FMS_PROV_AP_PASS
+        string "SoftAP provisioning WiFi password (WPA2, min 8 chars)"
+        default "fms12345"
+        help
+            Password of the FMS-NODE-xxxx access point the node emits in
+            provisioning mode. Print it on the enclosure label.
+
+    config FMS_WEB_PASS
+        string "Config portal login password"
+        default "admin1234"
+        help
+            Seeded into NVS on first boot; changeable from the portal
+            itself afterwards. Required to view or change anything.
+
+    config FMS_PROV_BUTTON_GPIO
+        int "Provisioning button GPIO (BOOT button)"
+        default 0
+        help
+            Hold this button ~5 s while the node is running to reboot
+            into the SoftAP config portal.
+
+    config FMS_TOWER_ENABLE
+        bool "Drive a DC signal tower light (relay module)"
+        default y
+
+    choice FMS_TOWER_BACKEND
+        prompt "Tower light output backend"
+        depends on FMS_TOWER_ENABLE
+        default FMS_TOWER_BACKEND_MBRTU
+        help
+            GPIO: relay module wired to GPIOs (bare devkit boards).
+            MBRTU: Modbus RTU relay module (e.g. Waveshare Modbus RTU
+            Relay) on the RS485 bus - right choice for the enclosed
+            DIN-rail board whose GPIOs are not exposed.
+
+        config FMS_TOWER_BACKEND_GPIO
+            bool "GPIO relay module"
+
+        config FMS_TOWER_BACKEND_MBRTU
+            bool "Modbus RTU relay module on RS485"
+    endchoice
+
+    config FMS_TOWER_MB_SLAVE
+        int "Tower relay module Modbus address"
+        depends on FMS_TOWER_BACKEND_MBRTU
+        default 1
+        help
+            Waveshare Modbus RTU Relay ships with address 1. Change one
+            device's address when sharing the bus with sensors that also
+            default to 1 (e.g. XY-MD02).
+
+    config FMS_TOWER_MB_COIL_BASE
+        int "First coil number (R,Y,G,B,BZ occupy 5 coils from here)"
+        depends on FMS_TOWER_BACKEND_MBRTU
+        default 0
+
+    config FMS_TOWER_ACTIVE_LOW
+        bool "Relay inputs trigger on LOW"
+        depends on FMS_TOWER_BACKEND_GPIO
+        # default n tu 21/07/2026: board relay HW-280 cua xuong kich muc CAO
+        # (chot sau saga dao cuc — jumper de nguyen vi tri goc). LUU Y: sua
+        # gia tri nay bang sdkconfig tay se bi confgen lat lai ve default —
+        # muon doi cuc thi doi DONG NAY (bai hoc: bin dao cuc chua bao gio
+        # duoc build du sdkconfig da sua, SHA khong doi e1e54c75f).
+        default n
+        help
+            Cheap opto-isolated relay boards close the relay when the IN
+            pin is pulled LOW. Disable for active-HIGH drivers (ULN2003).
+
+    config FMS_TOWER_STATUS_LIGHTS
+        bool "Light GREEN/YELLOW status colors automatically"
+        depends on FMS_TOWER_ENABLE
+        # default n tu 21/07/2026 (yeu cau user): den IM LANG la binh thuong
+        # — chi sang DO khi alarm hoac khi co lenh dieu khien tu server
+        # (nut test tren Odoo). Bat y neu muon kieu "den trang thai" cu:
+        # xanh = khoe, vang = mat mang/loi doc.
+        default n
+
+    config FMS_TOWER_BUZZER_ON_ALARM
+        bool "Sound the buzzer on local alarms (RED)"
+        depends on FMS_TOWER_ENABLE
+        default n
+
+    config FMS_TOWER_R_GPIO
+        int "Tower RED relay GPIO"
+        depends on FMS_TOWER_BACKEND_GPIO
+        default 10
+
+    config FMS_TOWER_Y_GPIO
+        int "Tower YELLOW relay GPIO"
+        depends on FMS_TOWER_BACKEND_GPIO
+        default 11
+
+    config FMS_TOWER_G_GPIO
+        int "Tower GREEN relay GPIO"
+        depends on FMS_TOWER_BACKEND_GPIO
+        default 12
+
+    config FMS_TOWER_B_GPIO
+        int "Tower BLUE relay GPIO"
+        depends on FMS_TOWER_BACKEND_GPIO
+        default 13
+
+    config FMS_TOWER_BZ_GPIO
+        int "Tower BUZZER relay GPIO"
+        depends on FMS_TOWER_BACKEND_GPIO
+        default 14
+
+endmenu

@@ -1,0 +1,22 @@
+menu "FMS: duong HTTP (uplink)"
+
+config UPLINK_HTTP_ENABLE
+    bool "Bat duong HTTP len edge_collector (/node/v1/*)"
+    default y
+    help
+      Duong truyen goc: node tu POST so do, tu GET lenh moi 2 giay.
+
+      TAT di thi ca uplink.c bien mat khoi anh nap — khong con
+      esp_http_client, khong con bo dem 4 KB, khong con ngan xep 8 KB.
+      Khi do mqtt_link phai gach het cong viec:
+
+        - phat so do: doc THANG tu spooler va ack theo PUBACK
+          (che do tap chi dung khi HTTP con bat)
+        - nhan lenh: dang ky <goc>/<serial>/cmd
+        - den bao suc khoe: uplink_server_ok() tra ve trang thai broker
+
+      Dieu kien bat buoc truoc khi tat: consumer ben edge phai chay o che
+      do DAY (EDGE_MQTT_CONSUMER_FORWARD=true). Tat HTTP trong khi consumer
+      con o che do bong thi khong con duong nao toi Odoo — day chuyen toi.
+
+endmenu

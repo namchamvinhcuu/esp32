@@ -1,0 +1,17 @@
+{
+  "idf.currentSetup": "C:\\esp\\v5.5.4\\esp-idf",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\admin\\Desktop\\ESp32\\firmware\\fms-node\\build"
+  ],
+  "idf.portWin": "COM3",
+  "idf.flashType": "UART"
+}

@@ -1,0 +1,25 @@
+sdkconfig
+sdkconfig.mqtt
+sdkconfig.old
+build/
+managed_components/
+build_http/
+sdkconfig.httpcheck
+.claude/
+.gemini/
+.vault-portal.conf
+
+# Vault + skill vault dung chung - symlink per-machine, source o repo rieng
+.obsidian-vault
+.common-skill
+.esp32-skill
+
+# Serena MCP local cache/config (per-machine)
+.serena/
+
+# graphify artifact - per-may, dung lai duoc bang `graphify update .`
+graphify-out/
+
+# CLAUDE.md/AGENTS.md = symlink per-machine -> sync qua claude-agents
+CLAUDE.md
+AGENTS.md

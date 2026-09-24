@@ -1,0 +1,19 @@
+{
+  "config_version": 1,
+  "upload_interval_s": 2,
+  "heartbeat_interval_s": 60,
+  "channels": [
+    {"code": "temp1", "bus": "mbtcp", "host": "192.168.5.201", "port": 502, "unit": 1, "func": 4, "reg": 0, "dtype": "u16", "scale": 0.1, "offset": 0, "period_ms": 1000, "unit_name": "°C"},
+    {"code": "humid1", "bus": "mbtcp", "host": "192.168.5.201", "port": 502, "unit": 1, "func": 4, "reg": 1, "dtype": "u16", "scale": 0.1, "offset": 0, "period_ms": 1000, "unit_name": "%RH"},
+    {"code": "scale_esp32", "bus": "serial", "uart": 1, "baud": 9600, "parser": "cas_generic", "unit_name": "g"},
+    {"code": "temp_rtu", "bus": "mbrtu", "slave": 1, "func": 3, "reg": 0, "dtype": "i16", "scale": 0.1, "offset": 0, "period_ms": 500, "unit_name": "°C"},
+    {"code": "humid_rtu", "bus": "mbrtu", "slave": 1, "func": 3, "reg": 1, "dtype": "u16", "scale": 0.1, "offset": 0, "period_ms": 500, "unit_name": "%RH"},
+    {"code": "count1", "bus": "gpio", "gpio": 2, "mode": "count", "edge": "falling", "debounce_ms": 40, "pull": "up", "period_ms": 200, "scale": 1, "offset": 0, "unit_name": "xung"},
+    {"code": "pedal1", "bus": "gpio", "gpio": 2, "mode": "state", "debounce_ms": 40, "invert": true, "pull": "up", "period_ms": 200},
+    {"code":"relay_15","bus":"gpio","gpio":15,"mode":"output","invert":false},
+    {"code":"relay_red","bus":"gpio","gpio":7,"mode":"output","invert":false},
+    {"code":"relay_green","bus":"gpio","gpio":14,"mode":"output","invert":false},
+    {"code":"relay_blue","bus":"gpio","gpio":6,"mode":"output","invert":false},
+    {"code":"relay_yellow","bus":"gpio","gpio":5,"mode":"output","invert":false}
+  ]
+}
