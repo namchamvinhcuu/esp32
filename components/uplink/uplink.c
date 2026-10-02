@@ -668,8 +668,10 @@ static void poll_command(void)
 
         /* Da thuc thi lenh nay roi (poll lai do mat ACK truoc): ack lai
          * nhung KHONG goi gpio_out_execute() lan nua — bam mot lan khong
-         * duoc bien thanh hai lan dao relay. Cung logic voi
-         * mqtt_link.c::handle_command() (s_last_id). */
+         * duoc bien thanh hai lan dao relay. Cung invariant voi
+         * mqtt_link.c::handle_command(), nhung o day CHI nho 1 id (chuoi
+         * A,B,A van chay A 2 lan); duong MQTT da dung cua so 32 khoa
+         * cmd_auth.c::cmd_dedup_*. */
         if (cmd_id == s_last_ok_cmd_id) {
             ESP_LOGI(TAG, "lenh %ld da thuc thi roi, chi ack lai", cmd_id);
             send_command_ack(cmd_id, true, NULL);
