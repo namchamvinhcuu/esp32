@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "sdkconfig.h"
 
@@ -34,8 +35,10 @@ void      mqtt_link_kick(void)      { }
 #else
 
 #include "cJSON.h"
+#include "mbedtls/md.h"
 
 #include "cfg.h"
+#include "cmd_auth.h"
 #include "gpio_out.h"
 #include "meas_core.h"
 #include "net_mgr.h"
@@ -81,9 +84,20 @@ void      mqtt_link_kick(void)      { }
 #define EPOCH_SANE_MS 1600000000000LL
 
 /* Lenh tu edge: {"id":123,"channel":"relay_blue","cmd":"write","value":1}
- * — khoang 70 byte. 192 la rong rai; goi dai hon bi bo va ghi nhat ky. */
-#define CMD_JSON_MAX  192
+ * — khoang 70 byte khi KHONG ky. Goi ky (them request_id 32 hex + ts + sig
+ * 64 hex) edge do duoc 126..198 byte (2026-10-02) -> 320 con du cho kenh
+ * ten dai. Goi dai hon bi bo. Edge chi gui goi ky khi node khai "sig_cmd",
+ * nen firmware cu (192) khong vo. */
+#define CMD_JSON_MAX  320
 #define CMD_QUEUE_LEN 4
+
+/* Lech gio toi da giua "ts" cua lenh ky (gio edge, unix giay) va gio node.
+ * Khop _CMD_MAX_SKEW_S cua node_agent/agent.py — chong phat lai mot goi
+ * lenh cu bat duoc tren broker. */
+#define CMD_MAX_SKEW_S 120
+
+/* Duoi moc nay gettimeofday() chua dong bo (node boot o 1970). */
+#define CLOCK_SANE_MS 1577836800000LL
 
 /* Cho PUBACK bao lau roi coi nhu mat va gui lai lo do. Chi dung o che do
  * spool. Gui lai co the sinh ban trung, nhung khoa chong trung cua may chu
@@ -106,6 +120,20 @@ static char                     s_topic_meas[TOPIC_MAX];
 static char                     s_topic_status[TOPIC_MAX];
 static char                     s_topic_cmd[TOPIC_MAX];
 static char                     s_topic_cmd_ack[TOPIC_MAX];
+/* Da khai "sig_cmd":true trong status cua phien broker hien tai (tuc la luc
+ * connect node CO api_key). Ghi tren tac vu su kien esp-mqtt, doc tren
+ * link_task — mot bool, khong can khoa. Edge chi ky khi thay co nay, nen
+ * chi BAT BUOC sig khi chinh minh da khai: key hoc duoc SAU luc connect thi
+ * toi lan noi lai ke tiep lenh van di khong ky (node_agent lam y het). */
+static volatile bool            s_sig_required;
+/* msg_id cua goi status "sig_cmd" phat lai giua phien (xem
+ * maybe_announce_sig()), -1 = khong cho. Ghi tren link_task luc enqueue,
+ * xoa tren tac vu su kien khi PUBACK toi — cung kieu s_inflight. */
+static volatile int             s_sig_status_msg = -1;
+static int64_t                  s_sig_status_us;   /* luc enqueue, chi link_task */
+
+#define STATUS_SIG_JSON   "{\"online\":true,\"cmd\":true,\"sig_cmd\":true}"
+#define STATUS_NOSIG_JSON "{\"online\":true,\"cmd\":true}"
 
 #if SPOOL_MODE
 static volatile int  s_inflight = -1;  /* msg_id dang cho PUBACK, -1 = trong */
@@ -280,76 +308,237 @@ static size_t build_body(const measurement_t *batch, size_t n, size_t *out_len)
  * Chu de ack la "cmdack" chu khong phai "cmd/ack" — mot tang, de ben doc
  * tach duoc serial ra khoi chu de bang cung mot phep tach nhu meas/status.
  */
-static void publish_cmd_ack(long id, bool ok, const char *detail)
+/* HMAC-SHA256(api_key, msg) -> 64 hex thuong. false neu mbedtls loi. */
+static bool hmac_hex(const char *key, const char *msg, size_t len,
+                     char out[CMD_SIG_HEX_LEN + 1])
 {
-    char body[128];
-    int n;
-    if (ok) {
-        n = snprintf(body, sizeof(body), "{\"id\":%ld,\"ok\":true}", id);
-    } else {
-        n = snprintf(body, sizeof(body), "{\"id\":%ld,\"ok\":false,\"detail\":\"%s\"}",
-                     id, detail ? detail : "");
+    uint8_t mac[32];
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (md == NULL ||
+        mbedtls_md_hmac(md, (const unsigned char *)key, strlen(key),
+                        (const unsigned char *)msg, len, mac) != 0) {
+        return false;
     }
-    if (n > 0 && (size_t)n < sizeof(body)) {
-        esp_mqtt_client_enqueue(s_cli, s_topic_cmd_ack, body, n, 1, 0, true);
+    cmd_hex_encode(mac, sizeof(mac), out);
+    return true;
+}
+
+/* Ack viet thang dang canonical (key da sort) — edge parse, bo "sig",
+ * json.dumps(sort_keys) lai roi so HMAC, nen chuoi o day PHAI la dung chuoi
+ * Python se tao ra. Co api_key thi luon ky, giong node_agent _publish().
+ * Bo dem TINH: chi link_task goi vao day. */
+static void publish_cmd_ack(long id, bool ok, const char *detail,
+                            const char *request_id)
+{
+    static char body[384];
+    int n = cmd_ack_build(body, sizeof(body), id, ok, detail, request_id);
+    if (n < 0) {
+        /* detail qua dai: van phai tra loi, bo detail di */
+        n = cmd_ack_build(body, sizeof(body), id, ok, "", request_id);
+        if (n < 0) {
+            ESP_LOGE(TAG, "khong dung noi ack cho lenh %ld", id);
+            return;
+        }
     }
+    const char *key = cfg_get_api_key();
+    if (key != NULL && key[0] != '\0') {
+        char sig[CMD_SIG_HEX_LEN + 1];
+        if (!hmac_hex(key, body, (size_t)n, sig)) {
+            ESP_LOGE(TAG, "hmac loi, ack lenh %ld di khong ky", id);
+        } else {
+            int m = cmd_ack_append_sig(body, sizeof(body), (size_t)n, sig);
+            if (m < 0) {
+                ESP_LOGE(TAG, "khong du cho gan sig vao ack lenh %ld", id);
+                return;
+            }
+            n = m;
+        }
+    }
+    esp_mqtt_client_enqueue(s_cli, s_topic_cmd_ack, body, n, 1, 0, true);
+}
+
+/* Gio node, ms. 0 neu chua dong bo (SNTP hoac server_time cua /hello). */
+static int64_t node_now_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    const int64_t ms = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    return ms >= CLOCK_SANE_MS ? ms : 0;
+}
+
+/* Lenh ky: sig dung tren raw bytes VA ts con moi. Tra NULL neu dat, chuoi
+ * detail ("sig_invalid"/"stale") neu khong. */
+static const char *check_auth(const char *raw, size_t raw_len, const cJSON *r)
+{
+    static char stripped[CMD_JSON_MAX];
+    char got[CMD_SIG_HEX_LEN + 1];
+    char want[CMD_SIG_HEX_LEN + 1];
+    size_t len = 0;
+
+    const char *key = cfg_get_api_key();
+    if (key == NULL || key[0] == '\0' ||
+        !cmd_sig_strip(raw, raw_len, stripped, sizeof(stripped), &len, got) ||
+        !hmac_hex(key, stripped, len, want) ||
+        !cmd_ct_equal(got, want, CMD_SIG_HEX_LEN)) {
+        return "sig_invalid";
+    }
+    const cJSON *jts = cJSON_GetObjectItemCaseSensitive(r, "ts");
+    /* Chan khoang truoc khi ep kieu: double ngoai khoang int64 -> UB. */
+    if (!cJSON_IsNumber(jts) || jts->valuedouble < 0 ||
+        jts->valuedouble > 1e11 ||
+        !cmd_ts_fresh((int64_t)jts->valuedouble, node_now_ms(), CMD_MAX_SKEW_S)) {
+        return "stale";
+    }
+    return NULL;
+}
+
+/* So JSON -> int32, ngoai khoang thi kep (ep double ngoai khoang la UB). */
+static int32_t cmd_i32(const cJSON *j)
+{
+    if (!cJSON_IsNumber(j)) {
+        return 0;
+    }
+    if (j->valuedouble <= 0) {
+        return 0;
+    }
+    if (j->valuedouble >= 2147483647.0) {
+        return INT32_MAX;
+    }
+    return (int32_t)j->valuedouble;
 }
 
 /* Thuc thi tren link_task chu KHONG tren tac vu su kien cua esp-mqtt:
  * ngan xep cua no chi 3584 byte va con phai chay ca dong giao thuc. Phan
- * tich cJSON cong ghi GPIO o do la cach chac chan de tran ngan xep. */
+ * tich cJSON cong ghi GPIO o do la cach chac chan de tran ngan xep.
+ *
+ * Thu tu (thong nhat voi node_agent/edge 2026-10-02): hinh dang -> xac
+ * thuc -> chong chay lai -> thuc thi. Xac thuc TRUOC chong chay lai: goi gia
+ * mao trung request_id khong duoc nhan ve ack ok:true. */
 static void handle_command(const char *json)
 {
-    static long s_last_id = -1;
+    /* Chi link_task dung — single-task, khong can khoa. RAM, mat khi reboot:
+     * sau reboot chi con cua so ts 120 s chan phat lai goi cu. */
+    static cmd_dedup_t s_dedup;
 
+    const size_t raw_len = strlen(json);
+    if (!cmd_json_depth_ok(json, raw_len, 2)) {
+        ESP_LOGW(TAG, "lenh long qua sau, bo (chong tran stack cJSON)");
+        return;
+    }
     cJSON *r = cJSON_Parse(json);
     if (r == NULL) {
         ESP_LOGW(TAG, "lenh khong phai JSON hop le");
         return;
     }
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(r, "id");
-    if (!cJSON_IsNumber(jid)) {
+    if (!cJSON_IsNumber(jid) || jid->valuedouble < 0 ||
+        jid->valuedouble > 2147483647.0 ||
+        jid->valuedouble != (double)(long)jid->valuedouble) {
+        ESP_LOGW(TAG, "lenh thieu id hop le, bo qua");
         cJSON_Delete(r);
         return;
     }
     const long id = (long)jid->valuedouble;
 
-    /* Gui lai cung mot id (QoS 1 cho phep trung) thi ACK lai nhung KHONG
-     * thuc thi lai — bam mot lan khong duoc bien thanh hai lan dao relay. */
-    if (id == s_last_id) {
-        ESP_LOGI(TAG, "lenh %ld da thuc thi roi, chi ack lai", id);
-        publish_cmd_ack(id, true, NULL);
+    const cJSON *jrid = cJSON_GetObjectItemCaseSensitive(r, "request_id");
+    const char *rid = (cJSON_IsString(jrid) && jrid->valuestring[0] != '\0' &&
+                       strlen(jrid->valuestring) <= 64)
+                          ? jrid->valuestring : NULL;
+
+    const cJSON *ch = cJSON_GetObjectItemCaseSensitive(r, "channel");
+    const cJSON *op = cJSON_GetObjectItemCaseSensitive(r, "cmd");
+    if (!cJSON_IsString(ch) || !cJSON_IsString(op)) {
+        ESP_LOGW(TAG, "lenh %ld thieu channel/cmd", id);
+        publish_cmd_ack(id, false, "bad_command", rid);
         cJSON_Delete(r);
         return;
     }
 
-    const cJSON *ch    = cJSON_GetObjectItemCaseSensitive(r, "channel");
-    const cJSON *op    = cJSON_GetObjectItemCaseSensitive(r, "cmd");
+    /* Co sig thi luon xac minh ke ca khi chua bat buoc — khop node_agent
+     * agent.py::_auth_reject_reason: goi ky sai / ts cu khong duoc chay. */
+    if (s_sig_required || strstr(json, ",\"sig\":\"") != NULL) {
+        const char *bad = check_auth(json, raw_len, r);
+        if (bad != NULL) {
+            ESP_LOGW(TAG, "lenh %ld bi tu choi: %s", id, bad);
+            publish_cmd_ack(id, false, bad, rid);
+            cJSON_Delete(r);
+            return;
+        }
+    }
+
+    /* Gui lai cung mot lenh (QoS 1 cho phep trung, hoac edge gui lai cung
+     * request_id) thi ACK lai nhung KHONG thuc thi lai — bam mot lan khong
+     * duoc bien thanh hai lan dao relay. Nho 32 khoa chu khong chi 1: chuoi
+     * A,B,A truoc kia chay A hai lan. */
+    const uint64_t dkey = cmd_dedup_key(rid, id);
+    if (cmd_dedup_seen(&s_dedup, dkey)) {
+        ESP_LOGI(TAG, "lenh %ld da thuc thi roi, chi ack lai", id);
+        publish_cmd_ack(id, true, "", rid);
+        cJSON_Delete(r);
+        return;
+    }
+
     const cJSON *value = cJSON_GetObjectItemCaseSensitive(r, "value");
     const cJSON *jms   = cJSON_GetObjectItemCaseSensitive(r, "ms");
     const cJSON *jper  = cJSON_GetObjectItemCaseSensitive(r, "period_ms");
-    const char *ch_code = cJSON_IsString(ch) ? ch->valuestring : "";
-    const char *op_str  = cJSON_IsString(op) ? op->valuestring : "";
+    const char *ch_code = ch->valuestring;
+    const char *op_str  = op->valuestring;
 
     const gpio_cmd_t gc = {
         .channel   = ch_code,
         .op        = op_str,
         .has_value = cJSON_IsNumber(value),
         .value     = cJSON_IsNumber(value) ? value->valuedouble : 0.0,
-        .ms        = cJSON_IsNumber(jms)  ? (int32_t)jms->valuedouble  : 0,
-        .period_ms = cJSON_IsNumber(jper) ? (int32_t)jper->valuedouble : 0,
+        .ms        = cmd_i32(jms),
+        .period_ms = cmd_i32(jper),
     };
     char detail[64];
     bool ok = gpio_out_execute(&gc, detail, sizeof(detail));
     if (ok) {
-        s_last_id = id;
+        cmd_dedup_remember(&s_dedup, dkey);
         ESP_LOGI(TAG, "lenh %ld [%s] tren kenh %s: OK", id, op_str, ch_code);
     } else {
         ESP_LOGW(TAG, "lenh %ld [%s] tren kenh %s bi tu choi: %s",
                  id, op_str, ch_code, detail);
     }
-    publish_cmd_ack(id, ok, detail);
+    publish_cmd_ack(id, ok, ok ? "" : detail, rid);
     cJSON_Delete(r);
+}
+
+/* Node len TRUOC, Odoo tao device SAU la duong provision pho bien nhat: luc
+ * connect chua co key -> khai khong sig_cmd -> vai giay sau /hello moi hoc
+ * duoc key. Neu cho toi lan noi lai thi ca phien MQTT (co the nhieu ngay)
+ * relay van nhan lenh KHONG ky. Nen hoc duoc key la khai lai ngay; edge doc
+ * lai sig_caps theo moi status (mqtt_consumer.py, nhanh "status").
+ * Thong nhat voi node_agent 2026-10-02 (cung lam y het). */
+static void maybe_announce_sig(void)
+{
+    if (!s_connected || s_sig_required) {
+        return;
+    }
+    if (s_sig_status_msg >= 0) {
+        /* Cho PUBACK qua lau thi khai lai: PUBACK co the toi TRUOC khi dong
+         * gan msg_id ben duoi chay (link_task bi chiem CPU), hoac outbox
+         * esp-mqtt het han va xoa goi im lang — ca hai lam cho kep o day
+         * ca phien, tuc nhan lenh khong ky. Phat lai goi retained vo hai. */
+        if (esp_timer_get_time() - s_sig_status_us <
+            (int64_t)PUBACK_TIMEOUT_MS * 1000) {
+            return;
+        }
+        ESP_LOGW(TAG, "khong thay PUBACK cua status sig_cmd, khai lai");
+        s_sig_status_msg = -1;
+    }
+    const char *key = cfg_get_api_key();
+    if (key == NULL || key[0] == '\0') {
+        return;
+    }
+    int id = esp_mqtt_client_enqueue(s_cli, s_topic_status, STATUS_SIG_JSON, 0,
+                                     1, 1, true);
+    if (id >= 0) {
+        s_sig_status_us = esp_timer_get_time();
+        s_sig_status_msg = id;
+        ESP_LOGI(TAG, "co api_key giua phien, khai lai status sig_cmd");
+    }
 }
 
 static void drain_commands(void)
@@ -384,13 +573,22 @@ static void on_mqtt_event(void *handler_args, esp_event_base_t base,
          * node cu (chi biet GET /node/v1/commands) khong co co nay nen van
          * duoc phuc vu bang hang doi poll. Khong phai dat cau hinh o hai
          * noi roi cho chung lech nhau. */
+        /* "sig_cmd":true — chi khi DA co api_key: edge thay co nay moi ky
+         * lenh xuong, va tu luc do node BAT BUOC sig (xem s_sig_required). */
+        {
+            const char *key = cfg_get_api_key();
+            s_sig_required = (key != NULL && key[0] != '\0');
+        }
+        s_sig_status_msg = -1;
         esp_mqtt_client_publish(s_cli, s_topic_status,
-                                "{\"online\":true,\"cmd\":true}", 0, 1, 1);
+                                s_sig_required ? STATUS_SIG_JSON : STATUS_NOSIG_JSON,
+                                0, 1, 1);
         ESP_LOGI(TAG, "da noi broker, dang ky %s", s_topic_cmd);
         break;
 
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false;
+        s_sig_status_msg = -1;   /* lan noi lai tu khai lai tu dau */
         ESP_LOGW(TAG, "mat ket noi broker");
         break;
 
@@ -420,8 +618,16 @@ static void on_mqtt_event(void *handler_args, esp_event_base_t base,
         }
         break;
 
-#if SPOOL_MODE
     case MQTT_EVENT_PUBLISHED:
+        /* Broker da giu status "sig_cmd" retained: tu day edge se ky, nen
+         * tu day moi bat buoc sig. Bat TRUOC PUBACK thi lenh khong ky edge
+         * gui trong luc goi status con tren duong se bi tu choi oan. */
+        if (s_sig_status_msg >= 0 && e->msg_id == s_sig_status_msg) {
+            s_sig_status_msg = -1;
+            s_sig_required = true;
+            ESP_LOGI(TAG, "da khai sig_cmd giua phien, tu gio bat buoc lenh ky");
+        }
+#if SPOOL_MODE
         /* PUBACK: broker da nhan. Gio moi duoc xoa khoi spooler. */
         if (s_inflight >= 0 && e->msg_id == s_inflight) {
             s_acked = true;
@@ -429,8 +635,8 @@ static void on_mqtt_event(void *handler_args, esp_event_base_t base,
                 xTaskNotifyGive(s_task);
             }
         }
-        break;
 #endif
+        break;
 
     case MQTT_EVENT_ERROR:
         ESP_LOGW(TAG, "loi mqtt");
@@ -643,6 +849,7 @@ static void link_task(void *arg)
 
     while (1) {
         esp_task_wdt_reset();
+        maybe_announce_sig();
         drain_commands();
 #if SPOOL_MODE
         pump_spool(batch);
