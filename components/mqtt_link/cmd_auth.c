@@ -335,3 +335,14 @@ bool cmd_duration_ms(bool present, bool is_number, double v, int32_t *out)
     *out = (int32_t)v;
     return true;
 }
+
+bool cmd_id_from_double(double v, long *out)
+{
+    *out = 0;
+    /* !(v >= 0) cũng bắt NaN. */
+    if (!(v >= 0) || v > 2147483647.0 || v != (double)(long)v) {
+        return false;
+    }
+    *out = (long)v;
+    return true;
+}

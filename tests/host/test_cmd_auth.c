@@ -572,6 +572,58 @@ static void test_duration_ms(void)
     check_dur("dur: +inf -> INT32_MAX", true, true, INFINITY, true, INT32_MAX);
 }
 
+/* id lenh (so JSON) -> long: hop le khi la so nguyen trong [0, INT32_MAX];
+ * NaN/am/le/qua lon -> false, *out = 0. Truoc day uplink.c::poll_command ep
+ * (long)id->valuedouble khong kep = UB voi 1e300/inf/NaN. out khoi tao bang
+ * gia tri rac de chung minh ham LUON ghi *out (ke ca nhanh false). */
+static void check_id(const char *name, double v, bool exp_ok, long exp_out)
+{
+    long out = 12345;
+    bool ok = cmd_id_from_double(v, &out);
+    int pass = ok == exp_ok && out == exp_out;
+    check(name, pass);
+    if (!pass) {
+        printf("    expected: ok=%d out=%ld\n    got     : ok=%d out=%ld\n",
+               exp_ok, exp_out, ok, out);
+    }
+}
+
+static void test_cmd_id(void)
+{
+    /* happy */
+    check_id("id: 0 -> 0", 0.0, true, 0);
+    check_id("id: -0.0 -> 0 (hop le)", -0.0, true, 0);
+    check_id("id: 1 -> 1", 1.0, true, 1);
+    check_id("id: 42 -> 42", 42.0, true, 42);
+
+    /* bien tren hop le */
+    check_id("id: 2147483646 -> 2147483646", 2147483646.0, true, 2147483646L);
+    check_id("id: 2147483647 (dung INT32_MAX) -> hop le", 2147483647.0, true, 2147483647L);
+
+    /* qua lon -> false (kiem khoang TRUOC khi ep kieu) */
+    check_id("id: 2147483647.5 -> false", 2147483647.5, false, 0);
+    check_id("id: 2147483648 (INT32_MAX+1) -> false", 2147483648.0, false, 0);
+    check_id("id: 1e10 -> false", 1e10, false, 0);
+    check_id("id: 1e300 -> false", 1e300, false, 0);
+    check_id("id: +inf -> false", INFINITY, false, 0);
+
+    /* am -> false */
+    check_id("id: -1 -> false", -1.0, false, 0);
+    check_id("id: -0.5 -> false", -0.5, false, 0);
+    check_id("id: -1e300 -> false", -1e300, false, 0);
+    check_id("id: -inf -> false", -INFINITY, false, 0);
+
+    /* le -> false */
+    check_id("id: 0.5 -> false", 0.5, false, 0);
+    check_id("id: 1.5 -> false", 1.5, false, 0);
+    check_id("id: 1e-300 (duong cuc nho) -> false", 1e-300, false, 0);
+    check_id("id: 2147483646.5 -> false", 2147483646.5, false, 0);
+
+    /* NaN -> false */
+    check_id("id: NaN -> false", NAN, false, 0);
+    check_id("id: -NaN -> false", -NAN, false, 0);
+}
+
 int main(void)
 {
     test_sig_strip();
@@ -582,6 +634,7 @@ int main(void)
     test_json_depth();
     test_ts_fresh();
     test_duration_ms();
+    test_cmd_id();
 
     if (g_fail) {
         printf("\n%d FAILURE(S)\n", g_fail);

@@ -21,12 +21,23 @@ thêm dòng đó vào `test_scale_parse.c` làm test case mới trước khi tin
 
 Phần thuần C của đường lệnh downlink (`components/mqtt_link/cmd_auth.c`): cắt
 `sig` khỏi gói canonical, escape JSON kiểu Python, dựng ack, cửa sổ dedup, kiểm
-`ts`, chuyển `ms`/`period_ms` thành int32 (`cmd_duration_ms`). Chạy từ thư mục gốc `esp32/`:
+`ts`, chuyển `ms`/`period_ms` thành int32 (`cmd_duration_ms`), kiểm `id` lệnh (`cmd_id_from_double`, dùng chung cho MQTT lẫn HTTP poll). Chạy từ thư mục gốc `esp32/`:
 
 ```bash
 gcc -Wall -Wextra -I components/mqtt_link tests/host/test_cmd_auth.c \
     components/mqtt_link/cmd_auth.c -o /tmp/test_cmd_auth
 /tmp/test_cmd_auth; echo "exit=$?"
+```
+
+Chạy thêm bản UBSan để bắt UB khi ép double → số nguyên (vd NaN lọt qua guard —
+bản thường vẫn PASS vì trên x86 kết quả ép NaN tình cờ vẫn bị từ chối).
+`-fno-sanitize-recover=all` là bắt buộc: thiếu nó UBSan chỉ in lỗi ra stderr mà exit vẫn 0.
+
+```bash
+gcc -Wall -Wextra -I components/mqtt_link tests/host/test_cmd_auth.c \
+    components/mqtt_link/cmd_auth.c \
+    -fsanitize=undefined,float-cast-overflow -fno-sanitize-recover=all \
+    -o /tmp/test_cmd_auth_ubsan && /tmp/test_cmd_auth_ubsan | tail -1
 ```
 
 Vector canonical/HMAC trong test sinh THẬT bằng Python (`json.dumps(sort_keys=True,

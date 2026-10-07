@@ -99,3 +99,8 @@ bool cmd_ts_fresh(int64_t ts_s, int64_t now_ms, int64_t max_skew_s);
  * Thuần C (không cJSON) để test bằng gcc: bên gọi tự truyền present /
  * is_number / giá trị số. */
 bool cmd_duration_ms(bool present, bool is_number, double v, int32_t *out);
+
+/* id lệnh (số JSON) -> long, dùng chung cho cả hai đường lệnh. Hợp lệ khi
+ * là số nguyên trong [0, INT32_MAX]; NaN/âm/lẻ/quá lớn -> false (*out = 0).
+ * Kiểm khoảng TRƯỚC khi ép kiểu: ép double ngoài khoảng là UB. */
+bool cmd_id_from_double(double v, long *out);

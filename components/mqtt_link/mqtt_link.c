@@ -424,14 +424,12 @@ static void handle_command(const char *json)
         return;
     }
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(r, "id");
-    if (!cJSON_IsNumber(jid) || jid->valuedouble < 0 ||
-        jid->valuedouble > 2147483647.0 ||
-        jid->valuedouble != (double)(long)jid->valuedouble) {
+    long id;
+    if (!cJSON_IsNumber(jid) || !cmd_id_from_double(jid->valuedouble, &id)) {
         ESP_LOGW(TAG, "lenh thieu id hop le, bo qua");
         cJSON_Delete(r);
         return;
     }
-    const long id = (long)jid->valuedouble;
 
     const cJSON *jrid = cJSON_GetObjectItemCaseSensitive(r, "request_id");
     const char *rid = (cJSON_IsString(jrid) && jrid->valuestring[0] != '\0' &&

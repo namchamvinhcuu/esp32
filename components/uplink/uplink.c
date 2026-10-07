@@ -664,8 +664,13 @@ static void poll_command(void)
     }
     const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(r, "command");
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(cmd, "id");
-    if (cJSON_IsObject(cmd) && cJSON_IsNumber(id)) {
-        const long cmd_id = (long)id->valuedouble;
+    long cmd_id;
+    if (cJSON_IsObject(cmd) && cJSON_IsNumber(id) &&
+        !cmd_id_from_double(id->valuedouble, &cmd_id)) {
+        /* Cung chan voi mqtt_link.c::handle_command(): id ngoai khoang ma
+         * ep (long) la UB. Khong co id hop le thi khong ack duoc. */
+        ESP_LOGW(TAG, "lenh thieu id hop le, bo qua");
+    } else if (cJSON_IsObject(cmd) && cJSON_IsNumber(id)) {
 
         /* Da thuc thi lenh nay roi (poll lai do mat ACK truoc): ack lai
          * nhung KHONG goi gpio_out_execute() lan nua — bam mot lan khong
