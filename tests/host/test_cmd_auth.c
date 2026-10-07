@@ -10,6 +10,9 @@
  *   hmac.new(b"k3y", canonical, hashlib.sha256).hexdigest()
  * Đổi format bên Python -> sinh lại vector, đừng sửa tay. Bắt được gói lệnh
  * THẬT từ edge (mosquitto_sub) -> thêm vào SIG_VECTORS trước khi tin parser. */
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -511,6 +514,64 @@ static void test_ts_fresh(void)
     check("ts: ts = 0 (thieu ts) voi gio that -> false", !cmd_ts_fresh(0, now, 120));
 }
 
+/* ---------------------------------------------------------------- duration_ms */
+
+/* Khop node_agent readers/base.py::duration_ms: None -> 0; khong phai so/NaN
+ * -> ValueError (= false o day); int(min(max(v, 0), 2**31 - 1)). out khoi tao
+ * bang gia tri rac de chung minh ham LUON ghi *out (ke ca nhanh false). */
+static void check_dur(const char *name, bool present, bool is_number, double v,
+                      bool exp_ok, int32_t exp_out)
+{
+    int32_t out = 12345;
+    bool ok = cmd_duration_ms(present, is_number, v, &out);
+    int pass = ok == exp_ok && out == exp_out;
+    check(name, pass);
+    if (!pass) {
+        printf("    expected: ok=%d out=%ld\n    got     : ok=%d out=%ld\n",
+               exp_ok, (long)exp_out, ok, (long)out);
+    }
+}
+
+static void test_duration_ms(void)
+{
+    /* vang mat: thieu truong hoac JSON null (ben goi truyen present=false) */
+    check_dur("dur: thieu truong -> 0, true", false, false, 0.0, true, 0);
+    check_dur("dur: JSON null (present=false) -> 0, true", false, false, 0.0, true, 0);
+    check_dur("dur: present=false bo qua v rac (NaN) -> 0, true", false, false, NAN, true, 0);
+    check_dur("dur: present=false bo qua v=5000 -> 0, true", false, true, 5000.0, true, 0);
+
+    /* loi: co mat nhung khong phai so / NaN -> tu choi, out = 0 */
+    check_dur("dur: chuoi/bool/object (is_number=false) -> false, out 0", true, false, 500.0, false, 0);
+    check_dur("dur: is_number=false, v=0 -> false", true, false, 0.0, false, 0);
+    check_dur("dur: NaN -> false, out 0", true, true, NAN, false, 0);
+    check_dur("dur: -NaN -> false, out 0", true, true, -NAN, false, 0);
+
+    /* bien duoi: <= 0 -> 0 */
+    check_dur("dur: am -1 -> 0", true, true, -1.0, true, 0);
+    check_dur("dur: am -0.5 -> 0", true, true, -0.5, true, 0);
+    check_dur("dur: am rat lon -1e300 -> 0", true, true, -1e300, true, 0);
+    check_dur("dur: -inf -> 0", true, true, -INFINITY, true, 0);
+    check_dur("dur: 0 -> 0", true, true, 0.0, true, 0);
+    check_dur("dur: -0.0 -> 0", true, true, -0.0, true, 0);
+    check_dur("dur: 1e-300 (duong cuc nho) -> 0", true, true, 1e-300, true, 0);
+    check_dur("dur: 0.5 -> 0 (cat phan le)", true, true, 0.5, true, 0);
+
+    /* happy */
+    check_dur("dur: 1 -> 1", true, true, 1.0, true, 1);
+    check_dur("dur: 500 -> 500", true, true, 500.0, true, 500);
+    check_dur("dur: 1500.9 -> 1500 (cat, khong lam tron)", true, true, 1500.9, true, 1500);
+
+    /* bien tren: kep INT32_MAX TRUOC khi ep kieu */
+    check_dur("dur: 2147483646 -> 2147483646", true, true, 2147483646.0, true, 2147483646);
+    check_dur("dur: 2147483646.9 -> 2147483646", true, true, 2147483646.9, true, 2147483646);
+    check_dur("dur: 2147483647 (dung INT32_MAX) -> INT32_MAX", true, true, 2147483647.0, true, INT32_MAX);
+    check_dur("dur: 2147483647.5 -> INT32_MAX", true, true, 2147483647.5, true, INT32_MAX);
+    check_dur("dur: 2147483648 (INT32_MAX+1) -> INT32_MAX", true, true, 2147483648.0, true, INT32_MAX);
+    check_dur("dur: 1e10 -> INT32_MAX", true, true, 1e10, true, INT32_MAX);
+    check_dur("dur: 1e300 -> INT32_MAX", true, true, 1e300, true, INT32_MAX);
+    check_dur("dur: +inf -> INT32_MAX", true, true, INFINITY, true, INT32_MAX);
+}
+
 int main(void)
 {
     test_sig_strip();
@@ -520,6 +581,7 @@ int main(void)
     test_dedup();
     test_json_depth();
     test_ts_fresh();
+    test_duration_ms();
 
     if (g_fail) {
         printf("\n%d FAILURE(S)\n", g_fail);

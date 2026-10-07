@@ -87,3 +87,15 @@ bool cmd_json_depth_ok(const char *raw, size_t len, int max_depth);
 /* Kiểm ts (unix GIÂY, giờ edge) so với giờ node. now_ms <= 0 nghĩa là
  * node chưa có giờ hợp lệ -> không chứng minh được còn mới -> false. */
 bool cmd_ts_fresh(int64_t ts_s, int64_t now_ms, int64_t max_skew_s);
+
+/* Trường ms/period_ms của lệnh on/off/write/blink -> int32, dùng chung cho
+ * CẢ HAI đường lệnh (mqtt_link.c::handle_command, uplink.c::poll_command).
+ * Khớp node_agent readers/base.py::duration_ms:
+ *   - present=false (thiếu trường hoặc JSON null) -> *out = 0, true;
+ *   - số <= 0 -> 0; số >= INT32_MAX (kể cả +inf) -> INT32_MAX — kẹp TRƯỚC
+ *     khi ép kiểu vì ép double ngoài khoảng int32 là UB;
+ *   - có mặt nhưng không phải số (chuỗi, bool, object, NaN) -> false: lệnh
+ *     phải bị TỪ CHỐI. Coi là 0 thì "on" giữ relay BẬT mãi không tự tắt.
+ * Thuần C (không cJSON) để test bằng gcc: bên gọi tự truyền present /
+ * is_number / giá trị số. */
+bool cmd_duration_ms(bool present, bool is_number, double v, int32_t *out);

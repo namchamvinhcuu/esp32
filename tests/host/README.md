@@ -2,26 +2,26 @@
 
 Test parser cân chạy trên PC, không cần ESP-IDF.
 
+Chạy từ thư mục gốc `esp32/` (máy Linux dev có sẵn `gcc`):
+
 ```bash
-gcc -Wall -I../../components/scale_serial test_scale_parse.c \
-    ../../components/scale_serial/scale_parse.c -o test_scale_parse
-./test_scale_parse
+gcc -Wall -I components/scale_serial tests/host/test_scale_parse.c \
+    components/scale_serial/scale_parse.c -o /tmp/test_scale_parse
+/tmp/test_scale_parse; echo "exit=$?"
 ```
 
-Máy này chưa có gcc — cài qua một trong các cách: `winget install MSYS2.MSYS2`
-(rồi `pacman -S mingw-w64-ucrt-x86_64-gcc`), hoặc WSL, hoặc dùng compiler đi kèm
-bất kỳ. Logic thuật toán đã được kiểm chứng bằng bản port Python 1:1 (12/12 PASS,
-xem lịch sử dự án).
+Máy Windows chưa có gcc thì cài MSYS2 (`winget install MSYS2.MSYS2`, rồi
+`pacman -S mingw-w64-ucrt-x86_64-gcc`) hoặc dùng WSL.
 
-**Quy tắc:** mỗi khi bắt được dòng dữ liệu THẬT từ cân của khách bằng
-`tools/capture_scale.py`, thêm dòng đó vào `test_scale_parse.c` làm test case
-mới trước khi tin parser.
+**Quy tắc:** mỗi khi bắt được dòng dữ liệu THẬT từ cân của khách (đọc thô cổng
+serial bằng bất kỳ công cụ nào, vd `idf.py monitor`, `minicom`, `pyserial`),
+thêm dòng đó vào `test_scale_parse.c` làm test case mới trước khi tin parser.
 
 # Host test — cmd_auth (lệnh MQTT ký HMAC + dedup)
 
 Phần thuần C của đường lệnh downlink (`components/mqtt_link/cmd_auth.c`): cắt
 `sig` khỏi gói canonical, escape JSON kiểu Python, dựng ack, cửa sổ dedup, kiểm
-`ts`. Chạy từ thư mục gốc `esp32/`:
+`ts`, chuyển `ms`/`period_ms` thành int32 (`cmd_duration_ms`). Chạy từ thư mục gốc `esp32/`:
 
 ```bash
 gcc -Wall -Wextra -I components/mqtt_link tests/host/test_cmd_auth.c \

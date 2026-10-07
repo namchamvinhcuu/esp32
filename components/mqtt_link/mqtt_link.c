@@ -392,19 +392,12 @@ static const char *check_auth(const char *raw, size_t raw_len, const cJSON *r)
     return NULL;
 }
 
-/* So JSON -> int32, ngoai khoang thi kep (ep double ngoai khoang la UB). */
-static int32_t cmd_i32(const cJSON *j)
+/* Truong ms/period_ms -> int32 qua cmd_duration_ms() (dung chung voi
+ * uplink.c::poll_command). false = co mat nhung khong phai so -> tu choi. */
+static bool cmd_ms_field(const cJSON *j, int32_t *out)
 {
-    if (!cJSON_IsNumber(j)) {
-        return 0;
-    }
-    if (j->valuedouble <= 0) {
-        return 0;
-    }
-    if (j->valuedouble >= 2147483647.0) {
-        return INT32_MAX;
-    }
-    return (int32_t)j->valuedouble;
+    return cmd_duration_ms(j != NULL && !cJSON_IsNull(j), cJSON_IsNumber(j),
+                           cJSON_IsNumber(j) ? j->valuedouble : 0.0, out);
 }
 
 /* Thuc thi tren link_task chu KHONG tren tac vu su kien cua esp-mqtt:
@@ -484,13 +477,24 @@ static void handle_command(const char *json)
     const char *ch_code = ch->valuestring;
     const char *op_str  = op->valuestring;
 
+    int32_t ms, period_ms;
+    if (!cmd_ms_field(jms, &ms) || !cmd_ms_field(jper, &period_ms)) {
+        /* Khop node_agent duration_ms(): coi la 0 thi "on" giu relay BAT
+         * mai khong tu tat. Khong nho vao dedup (lenh khong chay). */
+        ESP_LOGW(TAG, "lenh %ld [%s] tren kenh %s bi tu choi: ms/period_ms khong phai so",
+                 id, op_str, ch_code);
+        publish_cmd_ack(id, false, "ms/period_ms phai la so", rid);
+        cJSON_Delete(r);
+        return;
+    }
+
     const gpio_cmd_t gc = {
         .channel   = ch_code,
         .op        = op_str,
         .has_value = cJSON_IsNumber(value),
         .value     = cJSON_IsNumber(value) ? value->valuedouble : 0.0,
-        .ms        = cmd_i32(jms),
-        .period_ms = cmd_i32(jper),
+        .ms        = ms,
+        .period_ms = period_ms,
     };
     char detail[64];
     bool ok = gpio_out_execute(&gc, detail, sizeof(detail));

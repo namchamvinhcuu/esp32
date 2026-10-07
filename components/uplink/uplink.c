@@ -50,6 +50,7 @@ void      uplink_set_tower_cb(uplink_tower_cb_t cb) { (void)cb; }
 
 #include "ble_print.h"
 #include "cfg.h"
+#include "cmd_auth.h"
 #include "gpio_out.h"
 #include "meas_core.h"
 #include "net_mgr.h"
@@ -687,13 +688,27 @@ static void poll_command(void)
 
         const cJSON *jms  = cJSON_GetObjectItemCaseSensitive(cmd, "ms");
         const cJSON *jper = cJSON_GetObjectItemCaseSensitive(cmd, "period_ms");
+        /* Cung quy tac voi mqtt_link.c::cmd_ms_field(): kep truoc khi ep
+         * kieu (ep double ngoai khoang int32 la UB), khong phai so -> tu
+         * choi (khop node_agent duration_ms). */
+        int32_t ms, period_ms;
+        if (!cmd_duration_ms(jms != NULL && !cJSON_IsNull(jms), cJSON_IsNumber(jms),
+                             cJSON_IsNumber(jms) ? jms->valuedouble : 0.0, &ms) ||
+            !cmd_duration_ms(jper != NULL && !cJSON_IsNull(jper), cJSON_IsNumber(jper),
+                             cJSON_IsNumber(jper) ? jper->valuedouble : 0.0, &period_ms)) {
+            ESP_LOGW(TAG, "lenh '%s' tren kenh '%s' bi tu choi: ms/period_ms khong phai so",
+                     op_str, ch_code);
+            send_command_ack(cmd_id, false, "ms/period_ms phai la so");
+            cJSON_Delete(r);
+            return;
+        }
         const gpio_cmd_t gc = {
             .channel   = ch_code,
             .op        = op_str,
             .has_value = cJSON_IsNumber(value),
             .value     = cJSON_IsNumber(value) ? value->valuedouble : 0.0,
-            .ms        = cJSON_IsNumber(jms)  ? (int32_t)jms->valuedouble  : 0,
-            .period_ms = cJSON_IsNumber(jper) ? (int32_t)jper->valuedouble : 0,
+            .ms        = ms,
+            .period_ms = period_ms,
         };
         char detail[64];
         bool ok = gpio_out_execute(&gc, detail, sizeof(detail));

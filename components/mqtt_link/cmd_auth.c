@@ -315,3 +315,23 @@ bool cmd_ts_fresh(int64_t ts_s, int64_t now_ms, int64_t max_skew_s)
     }
     return d <= max_skew_s;
 }
+
+bool cmd_duration_ms(bool present, bool is_number, double v, int32_t *out)
+{
+    *out = 0;
+    if (!present) {
+        return true;
+    }
+    if (!is_number || v != v) {   /* v != v: NaN */
+        return false;
+    }
+    if (v <= 0) {
+        return true;
+    }
+    if (v >= 2147483647.0) {
+        *out = INT32_MAX;
+        return true;
+    }
+    *out = (int32_t)v;
+    return true;
+}
